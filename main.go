@@ -2,22 +2,29 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/1password/onepassword-sdk-go"
 	"github.com/jessevdk/go-flags"
+	"golang.org/x/crypto/ssh"
 )
 
+type SSHKey struct {
+	PublicKey         string `json:"publicKey"`
+	PrivateKeyPKCS8   string `json:"privateKeyPKCS8"`
+	PrivateKeyOpenSSH string `json:"privateKeyOpenSSH"`
+	Fingerprint       string `json:"fingerprint"`
+}
 type Secret struct {
 	MemorablePassword string `json:"memorablePassword"`
 	RandomPaswword    string `json:"randomPassword"`
-	SSHKey            string `json:"ssh_key"`
+	SSHKey            SSHKey `json:"ssh_key"`
 }
 
 type Options struct {
@@ -27,22 +34,45 @@ type Options struct {
 	CreatePassword          bool   `long:"create-password" description:"create password" required:"false"`
 }
 
-func createSSHKey() string {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+func createSSHKey() SSHKey {
+	// Generate a new ED25519 key pair
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		panic(err)
-	}
-	privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		panic(err)
+		log.Fatal("Failed to generate ED25519 key pair:", err)
 	}
 
-	sshKeyPEMBytes := string(pem.EncodeToMemory(&pem.Block{
+	// Convert private key to PKCS#8 PEM format
+	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		log.Fatal("Failed to marshal private key:", err)
+	}
+
+	privKeyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "PRIVATE KEY",
-		Bytes: privBytes,
-	}))
+		Bytes: privKeyBytes,
+	})
 
-	return sshKeyPEMBytes
+	// Convert public key to SSH format using the ssh package
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		log.Fatal("Failed to create SSH public key:", err)
+	}
+
+	// Convert PKCS#8 to OpenSSH format
+	opensshKey, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		log.Fatal("Failed to marshal private key to OpenSSH format:", err)
+	}
+
+	// Generate fingerprint (SHA256 hash of public key)
+	fingerprint := ssh.FingerprintSHA256(sshPublicKey)
+
+	return SSHKey{
+		PublicKey:         string(ssh.MarshalAuthorizedKey(sshPublicKey)),
+		PrivateKeyPKCS8:   string(privKeyPEM),
+		PrivateKeyOpenSSH: string(pem.EncodeToMemory(opensshKey)),
+		Fingerprint:       fingerprint,
+	}
 }
 
 func createPasswordMemorable() string {
@@ -112,11 +142,5 @@ func main() {
 		secret.RandomPaswword = createPassword()
 	}
 
-	json, err := json.MarshalIndent(secret, "", "  ")
-	if err != nil {
-		fmt.Println("Error marshalling secret to JSON:", err)
-		return
-	}
-
-	fmt.Println("Generated secret:", string(json))
+	fmt.Printf("Generated secret: %+v\n", secret)
 }
