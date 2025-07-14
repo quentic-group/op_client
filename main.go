@@ -21,11 +21,6 @@ type SSHKey struct {
 	PrivateKeyOpenSSH string `json:"privateKeyOpenSSH"`
 	Fingerprint       string `json:"fingerprint"`
 }
-type Secret struct {
-	MemorablePassword string `json:"memorablePassword"`
-	RandomPaswword    string `json:"randomPassword"`
-	SSHKey            SSHKey `json:"ssh_key"`
-}
 
 type Options struct {
 	SecretRef               string `short:"s" long:"secret-ref" description:"secret reference" required:"false"`
@@ -35,13 +30,12 @@ type Options struct {
 }
 
 func createSSHKey() SSHKey {
-	// Generate a new ED25519 key pair
+
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		log.Fatal("Failed to generate ED25519 key pair:", err)
 	}
 
-	// Convert private key to PKCS#8 PEM format
 	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		log.Fatal("Failed to marshal private key:", err)
@@ -52,19 +46,16 @@ func createSSHKey() SSHKey {
 		Bytes: privKeyBytes,
 	})
 
-	// Convert public key to SSH format using the ssh package
 	sshPublicKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		log.Fatal("Failed to create SSH public key:", err)
 	}
 
-	// Convert PKCS#8 to OpenSSH format
 	opensshKey, err := ssh.MarshalPrivateKey(privateKey, "")
 	if err != nil {
 		log.Fatal("Failed to marshal private key to OpenSSH format:", err)
 	}
 
-	// Generate fingerprint (SHA256 hash of public key)
 	fingerprint := ssh.FingerprintSHA256(sshPublicKey)
 
 	return SSHKey{
@@ -129,18 +120,23 @@ func main() {
 		fmt.Println("Resolved secret:", secret)
 	}
 
-	var secret Secret
 	if opts.CreateSSH {
-		secret.SSHKey = createSSHKey()
+		ssh := createSSHKey()
+		fmt.Println("Public Key: ", ssh.PublicKey)
+		fmt.Println("Private Key (OpenSSH):\n\n", ssh.PrivateKeyOpenSSH)
+		fmt.Println("Private Key (PKCS8):\n\n", ssh.PrivateKeyPKCS8)
+		fmt.Println("FingerPrint: ", ssh.Fingerprint)
+		fmt.Println("")
 	}
 
 	if opts.CreatePasswordMemorable {
-		secret.MemorablePassword = createPasswordMemorable()
+		memorablePassword := createPasswordMemorable()
+		fmt.Println("Memorable Password: ", memorablePassword)
 	}
-
+	fmt.Println("")
 	if opts.CreatePassword {
-		secret.RandomPaswword = createPassword()
+		password := createPassword()
+		fmt.Println("Password: ", password)
+		fmt.Println("")
 	}
-
-	fmt.Printf("Generated secret: %+v\n", secret)
 }
